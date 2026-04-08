@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
 import { initializeApp, getApps } from "firebase/app";
-import { getFirestore, doc, onSnapshot, setDoc } from "firebase/firestore";
-import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail } from "firebase/auth";
+import { getFirestore, doc, onSnapshot, setDoc, collection, query, where } from "firebase/firestore";
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
 
-// ── Firebase config ──
+// ── Firebase config (Manteniendo tus credenciales) ──
 const fbConfig = {
   apiKey: "AIzaSyDYAyfZnmIo6311bCFXo2geSmWKNJgPFqc",
   authDomain: "studio-manager-ab58e.firebaseapp.com",
@@ -20,7 +20,7 @@ const C = {
   white: "#FFFFFF", cream: "#FDFAF4", creamDeep: "#EDE0C4",
   gold: "#C9A84D", goldDark: "#A6893D",
   grayDark: "#222222", grayLight: "#777777",
-  red: "#C0392B", green: "#27AE60", amber: "#FFFBEB", amberDark: "#92400E"
+  red: "#C0392B", green: "#27AE60", amber: "#FFFBEB", amberDark: "#92400E", blue: "#3498DB"
 };
 
 export default function App() {
@@ -28,6 +28,7 @@ export default function App() {
   const [email, setEmail] = useState("");
   const [pass, setPass] = useState("");
   const [tab, setTab] = useState("perfil"); 
+  const [solicitudes, setSolicitudes] = useState([]); // Para las notificaciones de citas
   const [salonConfig, setSalonConfig] = useState({
     nombre: "Viviana Studios",
     logo: "",
@@ -42,35 +43,43 @@ export default function App() {
 
   useEffect(() => {
     if (!user) return;
-    const unsub = onSnapshot(doc(db, "configuraciones", user.uid), (snap) => {
+    // Escuchar configuración del salón
+    const unsubConfig = onSnapshot(doc(db, "configuraciones", user.uid), (snap) => {
       if (snap.exists()) setSalonConfig(snap.data());
     });
-    return unsub;
+    // Escuchar solicitudes de citas nuevas
+    const q = query(collection(db, "citas"), where("adminId", "==", user.uid), where("estado", "==", "pendiente"));
+    const unsubCitas = onSnapshot(q, (snap) => {
+      const docs = [];
+      snap.forEach(d => docs.push({ ...d.data(), id: d.id }));
+      setSolicitudes(docs);
+    });
+
+    return () => { unsubConfig(); unsubCitas(); };
   }, [user]);
 
   const login = () => signInWithEmailAndPassword(auth, email, pass).catch(() => alert("Credenciales incorrectas"));
 
   const guardarCambios = async (nuevaConfig) => {
     await setDoc(doc(db, "configuraciones", user.uid), nuevaConfig);
+    alert("¡Datos del salón actualizados!");
   };
 
   const agregarProfesional = () => {
     const nombre = prompt("Nombre del profesional:");
-    const cargo = prompt("Especialidad (ej: Manicurista):");
+    const cargo = prompt("Especialidad:");
     if (nombre && cargo) {
-      const nuevaConfig = { ...salonConfig, profesionales: [...(salonConfig.profesionales || []), { nombre, cargo, id: Date.now() }] };
-      setSalonConfig(nuevaConfig);
-      guardarCambios(nuevaConfig);
+      const n = { ...salonConfig, profesionales: [...(salonConfig.profesionales || []), { nombre, cargo, id: Date.now() }] };
+      setSalonConfig(n); guardarCambios(n);
     }
   };
 
   const agregarServicio = () => {
     const nombre = prompt("Nombre del servicio:");
-    const precio = prompt("Precio (solo números):");
+    const precio = prompt("Precio aproximado:");
     if (nombre && precio) {
-      const nuevaConfig = { ...salonConfig, servicios: [...(salonConfig.servicios || []), { nombre, precio, id: Date.now() }] };
-      setSalonConfig(nuevaConfig);
-      guardarCambios(nuevaConfig);
+      const n = { ...salonConfig, servicios: [...(salonConfig.servicios || []), { nombre, precio, id: Date.now() }] };
+      setSalonConfig(n); guardarCambios(n);
     }
   };
 
@@ -78,11 +87,11 @@ export default function App() {
     return (
       <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: C.cream, padding: 20 }}>
         <div style={{ background: C.white, padding: 40, borderRadius: 15, boxShadow: "0 10px 30px rgba(0,0,0,0.1)", width: "100%", maxWidth: 400 }}>
-          <h2 style={{ textAlign: "center", fontFamily: "serif", color: C.goldDark, marginBottom: 30, letterSpacing: 2 }}>ADMINISTRACIÓN</h2>
+          <h2 style={{ textAlign: "center", fontFamily: "serif", color: C.goldDark, marginBottom: 30 }}>ADMINISTRACIÓN</h2>
           <div style={{ display: "flex", flexDirection: "column", gap: 15 }}>
-            <input type="email" placeholder="Email" style={{ padding: 14, borderRadius: 10, border: `1px solid ${C.creamDeep}`, outline: "none" }} onChange={e => setEmail(e.target.value)} />
-            <input type="password" placeholder="Contraseña" style={{ padding: 14, borderRadius: 10, border: `1px solid ${C.creamDeep}`, outline: "none" }} onChange={e => setPass(e.target.value)} />
-            <button onClick={login} style={{ background: C.goldDark, color: C.white, padding: 14, borderRadius: 10, border: "none", cursor: "pointer", fontWeight: "bold", marginTop: 10 }}>ENTRAR</button>
+            <input type="email" placeholder="Email" style={{ padding: 14, borderRadius: 10, border: `1px solid ${C.creamDeep}` }} onChange={e => setEmail(e.target.value)} />
+            <input type="password" placeholder="Contraseña" style={{ padding: 14, borderRadius: 10, border: `1px solid ${C.creamDeep}` }} onChange={e => setPass(e.target.value)} />
+            <button onClick={login} style={{ background: C.goldDark, color: C.white, padding: 14, borderRadius: 10, border: "none", fontWeight: "bold" }}>ENTRAR</button>
           </div>
         </div>
       </div>
@@ -91,73 +100,76 @@ export default function App() {
 
   return (
     <div style={{ minHeight: "100vh", background: C.cream, paddingBottom: 100 }}>
-      <header style={{ background: C.white, padding: "25px", textAlign: "center", borderBottom: `1px solid ${C.creamDeep}`, boxShadow: "0 2px 10px rgba(0,0,0,0.02)" }}>
-        <h1 style={{ fontFamily: "serif", fontSize: 26, color: C.goldDark, textTransform: "uppercase", letterSpacing: 3 }}>{salonConfig.nombre}</h1>
+      <header style={{ background: C.white, padding: "20px", textAlign: "center", borderBottom: `1px solid ${C.creamDeep}` }}>
+        {salonConfig.logo && <img src={salonConfig.logo} alt="Logo" style={{ height: 50, marginBottom: 10, borderRadius: "50%" }} />}
+        <h1 style={{ fontFamily: "serif", fontSize: 22, color: C.goldDark, margin: 0 }}>{salonConfig.nombre}</h1>
       </header>
 
-      <main style={{ padding: 20, maxWidth: 700, margin: "0 auto", display: "flex", flexDirection: "column", gap: 25 }}>
+      <main style={{ padding: 20, maxWidth: 600, margin: "0 auto", display: "flex", flexDirection: "column", gap: 20 }}>
         
+        {tab === "agenda" && (
+          <section>
+            <h3 style={{ color: C.grayDark }}>📥 Solicitudes de Citas ({solicitudes.length})</h3>
+            {solicitudes.length === 0 ? (
+              <p style={{ color: C.grayLight, textAlign: "center", marginTop: 20 }}>No tienes solicitudes pendientes.</p>
+            ) : (
+              solicitudes.map(cita => (
+                <div key={cita.id} style={{ background: C.white, p: 15, borderRadius: 15, border: `1px solid ${C.creamDeep}`, marginBottom: 10, padding: 15 }}>
+                  <p><strong>Cliente:</strong> {cita.clienteNombre}</p>
+                  <p><strong>Servicio:</strong> {cita.servicio}</p>
+                  <p><strong>Propuesta:</strong> {cita.fecha} a las {cita.hora}</p>
+                  <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+                    <button style={{ flex: 1, background: C.green, color: "white", padding: 8, borderRadius: 8, border: "none" }}>Aceptar</button>
+                    <button style={{ flex: 1, background: C.blue, color: "white", padding: 8, borderRadius: 8, border: "none" }}>Contraoferta</button>
+                  </div>
+                </div>
+              ))
+            )}
+          </section>
+        )}
+
         {tab === "perfil" && (
           <>
-            {/* Gestión del Salón */}
-            <section style={{ background: C.white, padding: 25, borderRadius: 15, boxShadow: "0 4px 6px rgba(0,0,0,0.02)", border: `1px solid ${C.creamDeep}` }}>
-              <h3 style={{ marginBottom: 20, color: C.grayDark }}>🏠 Configuración General</h3>
+            <section style={{ background: C.white, padding: 20, borderRadius: 15, border: `1px solid ${C.creamDeep}` }}>
+              <h3 style={{ margin: "0 0 15px 0" }}>📸 Identidad del Local</h3>
               <input 
+                placeholder="Nombre del Salón" 
                 value={salonConfig.nombre} 
-                onChange={e => setSalonConfig({ ...salonConfig, nombre: e.target.value })}
-                style={{ width: "100%", padding: 12, borderRadius: 8, border: `1px solid ${C.creamDeep}`, marginBottom: 10 }}
-                placeholder="Nombre del Salón"
+                onChange={e => setSalonConfig({...salonConfig, nombre: e.target.value})}
+                style={{ width: "100%", padding: 12, borderRadius: 8, border: `1px solid ${C.creamDeep}`, marginBottom: 10 }} 
               />
-              <button onClick={() => guardarCambios(salonConfig)} style={{ width: "100%", background: C.green, color: "white", padding: 12, borderRadius: 8, border: "none", fontWeight: "bold" }}>Guardar Nombre</button>
+              <input 
+                placeholder="URL del Logo (ej: https://...)" 
+                value={salonConfig.logo} 
+                onChange={e => setSalonConfig({...salonConfig, logo: e.target.value})}
+                style={{ width: "100%", padding: 12, borderRadius: 8, border: `1px solid ${C.creamDeep}`, marginBottom: 10 }} 
+              />
+              <button onClick={() => guardarCambios(salonConfig)} style={{ width: "100%", background: C.green, color: "white", padding: 12, borderRadius: 8, border: "none", fontWeight: "bold" }}>Guardar Identidad</button>
             </section>
 
-            {/* Equipo de Trabajo */}
-            <section style={{ background: C.white, padding: 25, borderRadius: 15, boxShadow: "0 4px 6px rgba(0,0,0,0.02)", border: `1px solid ${C.creamDeep}` }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-                <h3 style={{ color: C.grayDark, margin: 0 }}>👩‍🎨 Equipo de Trabajo</h3>
-                <button onClick={agregarProfesional} style={{ background: C.grayDark, color: "white", padding: "8px 15px", borderRadius: 8, border: "none", fontSize: 13 }}>+ Añadir</button>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {(salonConfig.profesionales || []).map(p => (
-                  <div key={p.id} style={{ display: "flex", justifyContent: "space-between", padding: 15, background: C.cream, borderRadius: 10, border: `1px solid ${C.creamDeep}` }}>
-                    <div>
-                      <p style={{ margin: 0, fontWeight: "bold" }}>{p.nombre}</p>
-                      <p style={{ margin: 0, fontSize: 11, color: C.grayLight, textTransform: "uppercase" }}>{p.cargo}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            {/* Servicios */}
-            <section style={{ background: C.white, padding: 25, borderRadius: 15, boxShadow: "0 4px 6px rgba(0,0,0,0.02)", border: `1px solid ${C.creamDeep}` }}>
+            <section style={{ background: C.white, padding: 20, borderRadius: 15, border: `1px solid ${C.creamDeep}` }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 15 }}>
-                <h3 style={{ color: C.grayDark, margin: 0 }}>✨ Servicios</h3>
-                <button onClick={agregarServicio} style={{ background: C.gold, color: "white", padding: "8px 15px", borderRadius: 8, border: "none", fontSize: 13 }}>+ Nuevo</button>
+                <h3 style={{ margin: 0 }}>👩‍🎨 Equipo</h3>
+                <button onClick={agregarProfesional} style={{ background: C.grayDark, color: "white", padding: "5px 15px", borderRadius: 8, border: "none" }}>+ Añadir</button>
               </div>
-              <div style={{ background: C.amber, padding: 10, borderRadius: 8, border: `1px solid ${C.creamDeep}`, marginBottom: 15 }}>
-                <p style={{ margin: 0, fontSize: 11, color: C.amberDark }}>⚠️ Los precios se mostrarán como "Valores aproximados sujetos a evaluación".</p>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                {(salonConfig.servicios || []).map(s => (
-                  <div key={s.id} style={{ padding: 15, border: `1px solid ${C.creamDeep}`, borderRadius: 10 }}>
-                    <p style={{ margin: 0, fontSize: 14, fontWeight: "bold" }}>{s.nombre}</p>
-                    <p style={{ margin: 0, color: C.goldDark, fontWeight: "bold" }}>${s.precio}</p>
-                  </div>
-                ))}
-              </div>
+              {salonConfig.profesionales?.map(p => (
+                <div key={p.id} style={{ padding: 10, borderBottom: `1px solid ${C.cream}`, fontSize: 14 }}>{p.nombre} - {p.cargo}</div>
+              ))}
             </section>
           </>
         )}
-
-        {tab === "agenda" && <p style={{ textAlign: "center", color: C.grayLight, marginTop: 50 }}>Tu agenda inteligente se está configurando...</p>}
       </main>
 
-      <nav style={{ position: "fixed", bottom: 0, width: "100%", background: C.white, display: "flex", justifyContent: "space-around", padding: "15px 0", borderTop: `1px solid ${C.creamDeep}`, boxShadow: "0 -2px 10px rgba(0,0,0,0.05)" }}>
-        <button onClick={() => setTab("agenda")} style={{ background: "none", border: "none", color: tab === "agenda" ? C.goldDark : C.grayLight, fontWeight: tab === "agenda" ? "bold" : "normal" }}>Agenda</button>
-        <button onClick={() => setTab("perfil")} style={{ background: "none", border: "none", color: tab === "perfil" ? C.goldDark : C.grayLight, fontWeight: tab === "perfil" ? "bold" : "normal" }}>Mi Salón</button>
+      <nav style={{ position: "fixed", bottom: 0, width: "100%", background: C.white, display: "flex", justifyContent: "space-around", padding: "15px 0", borderTop: `1px solid ${C.creamDeep}` }}>
+        <button onClick={() => setTab("agenda")} style={{ background: "none", border: "none", color: tab === "agenda" ? C.goldDark : C.grayLight }}>
+          Agenda {solicitudes.length > 0 && <span style={{ background: C.red, color: "white", borderRadius: "50%", padding: "2px 6px", fontSize: 10 }}>{solicitudes.length}</span>}
+        </button>
+        <button onClick={() => setTab("perfil")} style={{ background: "none", border: "none", color: tab === "perfil" ? C.goldDark : C.grayLight }}>Mi Salón</button>
         <button onClick={() => signOut(auth)} style={{ background: "none", border: "none", color: C.red }}>Salir</button>
       </nav>
+    </div>
+  );
+}
     </div>
   );
 }
