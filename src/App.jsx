@@ -199,7 +199,6 @@ export default function App() {
   );
 }
 
-// ── VISTAS Y COMPONENTES (Todos los originales se mantienen) ──
 
 function Login({ auth, gProvider, onToast }) {
   const [email, setEmail] = useState("");
@@ -233,7 +232,3 @@ function Login({ auth, gProvider, onToast }) {
     </div>
   );
 }
-
-// ... Resto de componentes (ViewAgenda, ViewSolicitudes, ViewClientas, ViewConfig, Modales...)
-// Nota: Para no saturar el mensaje, asume que el resto del código es idéntico a tu archivo subido. 
-// He verificado que todas las referencias a funciones (ModalNuevaClienta, etc.) coincidan con tu estructura.
